@@ -1,8 +1,11 @@
-﻿using Azure.Storage.Blobs.Specialized;
+﻿using Azure.Storage.Blobs;
+using Azure.Storage.Blobs.Models;
+using Azure.Storage.Blobs.Specialized;
 using System;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO;
+using System.Net.Mime;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -14,7 +17,8 @@ namespace DanielLarsenNZ
         private readonly string _containerName;
         private readonly ConcurrentQueue<string> _queue = new ConcurrentQueue<string>();
         private readonly Timer _timer;
-        private Task _sendItems;
+        //private Task _sendItems;
+        private bool _containerExists;
 
         private const int MaxItemsToAppendAtATime = 500;
 
@@ -22,7 +26,8 @@ namespace DanielLarsenNZ
         {
             _connectionString = connectionString;
             _containerName = containerName;
-            _timer = new Timer(TimerCallback, null, 5000, 5000);
+            _timer = new Timer(TimerCallback);
+            ScheduleAppendLogsLater();
         }
 
         /// <summary>
@@ -40,18 +45,28 @@ namespace DanielLarsenNZ
             _queue.Enqueue(message + "\n");
         }
 
-        private void TimerCallback(object state)
+        public override void Flush()
         {
-            if (_sendItems != null && _sendItems.Status == TaskStatus.Running)
-            {
-                // Don't Trace!
-                Console.WriteLine("BlobTraceListener: SendItems() not called as Task status = Running");
-            }
-
-            _sendItems = SendItems();
+            ScheduleAppendLogsNow();
+            base.Flush();
         }
 
-        private async Task SendItems()
+        private void ScheduleAppendLogsNow()
+            => _timer.Change(10, Timeout.Infinite);
+
+        private void ScheduleAppendLogsLater()
+            => _timer.Change(5000, Timeout.Infinite);
+
+        private void TimerCallback(object state) => AppendLogs();
+
+        private async Task CreateContainerIfNotExists()
+        {
+            var blobServiceClient = new BlobServiceClient(_connectionString);
+            var containerClient = blobServiceClient.GetBlobContainerClient(_containerName);
+            await containerClient.CreateIfNotExistsAsync(PublicAccessType.None);
+        }
+
+        private async Task AppendLogs()
         {
             // Async timer in Scheduler Background Service
             // https://stackoverflow.com/a/53844845
@@ -60,18 +75,24 @@ namespace DanielLarsenNZ
             {
                 if (_queue.IsEmpty) return;
 
-                var now = DateTime.UtcNow;
+                if (!_containerExists)
+                {
+                    _containerExists = true;
+                    await CreateContainerIfNotExists();
+                }
+
+                var filename = $"{DateTime.UtcNow.ToString("yyyy/MM/dd/hh")}.log";
 
                 var appendBlobClient = new AppendBlobClient(
                     _connectionString, 
                     _containerName, 
-                    now.ToString("yyyyMMddhh"));
-
-                await appendBlobClient.CreateIfNotExistsAsync();
+                    filename);
+                
+                await appendBlobClient.CreateIfNotExistsAsync(new BlobHttpHeaders { ContentType = "text/plain" });
 
                 using (var stream = new MemoryStream())
                 {
-                    using (var writer = new StreamWriter(new MemoryStream()))
+                    using (var writer = new StreamWriter(stream))
                     {
                         int i = 0;
                         while (!_queue.IsEmpty)
@@ -84,13 +105,14 @@ namespace DanielLarsenNZ
 
                         if (i > 0)
                         {
+                            writer.Flush();
                             stream.Seek(0, SeekOrigin.Begin);
                             await appendBlobClient.AppendBlockAsync(stream);
                         }
                         else
                         {
                             // Don't Trace!
-                            Console.WriteLine("Could not TryDequeue any items");
+                            Console.WriteLine("BlobTraceListener.SendItems: Could not TryDequeue any items");
                         }
                     }
                 }
@@ -98,7 +120,11 @@ namespace DanielLarsenNZ
             catch (Exception ex)
             {
                 // Can't Trace here!
-                Console.WriteLine($"BlobTraceListener: {ex.Message}");
+                Console.WriteLine($"BlobTraceListener.SendItems: {ex.Message}");
+            }
+            finally
+            {
+                ScheduleAppendLogsLater();
             }
         }
     }
