@@ -11,7 +11,12 @@ using System.Threading.Tasks;
 
 namespace DanielLarsenNZ
 {
-    public sealed class BlobTraceListener : TraceListener
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <remarks>Implementation follows https://github.com/dotnet/runtime/blob/master/src/libraries/System.Diagnostics.TextWriterTraceListener/src/System/Diagnostics/TextWriterTraceListener.cs </remarks>
+    public class BlobTraceListener : TraceListener
     {
         private readonly string _connectionString;
         private readonly string _containerName;
@@ -22,7 +27,12 @@ namespace DanielLarsenNZ
 
         private const int MaxItemsToAppendAtATime = 500;
 
-        public BlobTraceListener(string connectionString, string containerName)
+        public BlobTraceListener(string connectionString, string containerName):this(connectionString, containerName, string.Empty)
+        {
+
+        }
+
+        public BlobTraceListener(string connectionString, string containerName, string name) : base(name)
         {
             _connectionString = connectionString;
             _containerName = containerName;
@@ -47,7 +57,10 @@ namespace DanielLarsenNZ
 
         public override void Flush()
         {
-            ScheduleAppendLogsNow();
+            //ScheduleAppendLogsNow();
+
+            _timer.Change(Timeout.Infinite, Timeout.Infinite);
+            AppendLogs().GetAwaiter().GetResult();
             base.Flush();
         }
 

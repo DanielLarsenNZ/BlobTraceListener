@@ -25,24 +25,23 @@ namespace DanielLarsenNZ.Tests
             }
 
             listener.Flush();
-            Thread.Sleep(5000);
         }
 
-        [TestMethod]
-        public void TextWriterTest()
-        {
-            Stream myFile = File.Create("c:\\Users\\dalars\\Downloads\\test.log");
+        //[TestMethod]
+        //public void TextWriterTest()
+        //{
+        //    Stream myFile = File.Create("c:\\Users\\dalars\\Downloads\\test.log");
 
-            /* Create a new text writer using the output stream, and add it to
-             * the trace listeners. */
-            TextWriterTraceListener myTextListener = new TextWriterTraceListener(myFile);
-            Trace.Listeners.Add(myTextListener);
+        //    /* Create a new text writer using the output stream, and add it to
+        //     * the trace listeners. */
+        //    TextWriterTraceListener myTextListener = new TextWriterTraceListener(myFile);
+        //    Trace.Listeners.Add(myTextListener);
 
-            // Write output to the file.
-            Trace.Write("Test output ");
+        //    // Write output to the file.
+        //    Trace.Write("Test output ");
 
-            // Flush the output.
-            Trace.Flush();
-        }
+        //    // Flush the output.
+        //    Trace.Flush();
+        //}
     }
 }
