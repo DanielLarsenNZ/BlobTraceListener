@@ -1,4 +1,35 @@
-# Azure Monitor Trace Listener
+# BlobTraceListener
+
+Writes diagnostic trace messages to Azure Blob Storage.
+
+## Usage
+
+Basic
+
+```csharp
+var listener = new BlobTraceListener(
+    config["AZURE_STORAGE_CONNECTIONSTRING"],
+    config["AZURE_STORAGE_CONTAINER_NAME"]);
+
+listener.WriteLine("Hello world");
+```
+
+With options
+
+```csharp
+var listener = new BlobTraceListener(
+    config["AZURE_STORAGE_CONNECTIONSTRING"],
+    config["AZURE_STORAGE_CONTAINER_NAME"],
+    string.Empty,
+    new BlobTraceListenerOptions
+    {
+        BackgroundScheduleTimeoutMs = 4000,
+        FilenameFormat = "yyyy/MM/dd/HH\\.\\l\\o\\g",
+        MaxLogMessagesToKeep = 20000
+    });
+
+listener.WriteLine("Hello world!");
+```
 
 ## Links and references
 
