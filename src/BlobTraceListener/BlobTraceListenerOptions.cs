@@ -1,45 +1,45 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
-
-namespace DanielLarsenNZ
+﻿namespace DanielLarsenNZ
 {
+    /// <summary>
+    /// Options for <seealso cref="BlobTraceListener"/>
+    /// </summary>
     public class BlobTraceListenerOptions
     {
-        private const int DefaultMaxErrorMessagesToQueue = 100;
-        private const int DefaultMaxLogMessagesToQueue = 10000;
+        private const int DefaultMaxLogMessagesToQueue = 20000;
         private const string DefaultFileNameFormat = "yyyy/MM/dd/HH\\.\\l\\o\\g";
-        private const string DefaultErrorsFileNameFormat = "yyyy/MM/dd/HH\\.\\e\\r\\r\\o\\r\\s\\.\\l\\o\\g";
-        private const int DefaultBackgroundScheduleTimeoutMs = 5000;
+        private const int DefaultBackgroundScheduleTimeoutMs = 4000;
+        private const int DefaultMaxTraceListenerErrorMessagesToKeep = 20;
 
         public BlobTraceListenerOptions()
         {
             MaxLogMessagesToKeep = DefaultMaxLogMessagesToQueue;
-            MaxErrorMessagesToKeep = DefaultMaxErrorMessagesToQueue;
             FilenameFormat = DefaultFileNameFormat;
-            TraceListenerErrorsFilenameFormat = DefaultErrorsFileNameFormat;
             BackgroundScheduleTimeoutMs = DefaultBackgroundScheduleTimeoutMs;
+            MaxTraceListenerErrorMessagesToKeep = DefaultMaxTraceListenerErrorMessagesToKeep;
         }
 
-        public int MaxItemsToAppendAtATime { get; set; }
-
-        public int MaxErrorMessagesToKeep { get; set; }
-
+        /// <summary>
+        /// The maximum number of log messages to queue. Any messages that attempt to be written when 
+        /// queue is full will be dropped. Default is 20,000.
+        /// </summary>
         public int MaxLogMessagesToKeep { get; set; }
 
         /// <summary>
-        /// When true, any errors thrown by the Trace Listener will attempt to be written to an errors 
-        /// log. By default the same container name will be used, but this can be overridden by <seealso cref="TraceListenerErrorsContainerName"/>
+        /// The format string passed to `DateTime.UtcNow.ToString()` to derive the blob filename. Default is "yyyy/MM/dd/HH\\.\\l\\o\\g".
         /// </summary>
-        public bool AppendTraceListenerErrors { get; set; }
-
-        public string TraceListenerErrorsContainerName { get; set; }
-
         public string FilenameFormat { get; set; }
-        
-        public string TraceListenerErrorsFilenameFormat { get; set; }
 
+        /// <summary>
+        /// The number of milliseconds to wait before starting a background task to append logs to Blob storage. Default is 4,000 milliseconds.
+        /// </summary>
+        /// <remarks>If all queued messages cannot be appended in one blob (~4MB) then the timeout is shortened to 1,000ms until the queue is cleared.</remarks>
         public int BackgroundScheduleTimeoutMs { get; set; }
+
+        /// <summary>
+        /// The maximum number of errors thrown by the listener to keep in memory. Default is 20. Errors 
+        /// beyond this number will be dequeued FIFO.
+        /// </summary>
+        internal int MaxTraceListenerErrorMessagesToKeep { get; set; }
 
         /// <summary>
         /// Prevents rescheduling of the Time. For testing purposes only.

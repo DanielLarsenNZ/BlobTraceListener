@@ -26,9 +26,7 @@ namespace DanielLarsenNZ
         private readonly ConcurrentQueue<string> _queue = new ConcurrentQueue<string>();
         private readonly ConcurrentQueue<string> _errorsQueue = new ConcurrentQueue<string>();
         private readonly Timer _timer;
-        private readonly Timer _errorsTimer;
         private bool _containerExists;
-        private bool _errorsContainerExists;
         private readonly BlobTraceListenerOptions _options;
 
         public BlobTraceListener(string connectionString, string containerName) : this(
@@ -50,13 +48,7 @@ namespace DanielLarsenNZ
             _options = options;
             _timer = new Timer(TimerCallback);
             
-            ScheduleAppendLogs();
-            
-            if (_options.AppendTraceListenerErrors)
-            {
-                _errorsTimer = new Timer(ErrorsTimerCallback);
-                ScheduleAppendErrors();
-            }
+            ScheduleAppendLogs();            
         }
 
         /// <summary>
@@ -64,20 +56,36 @@ namespace DanielLarsenNZ
         /// </summary>
         public override bool IsThreadSafe => true;
 
-        internal int ErrorCount { get; private set; }
+        /// <summary>
+        /// A count of errors thrown by this TraceListener. 
+        /// </summary>
+        internal uint ErrorCount { get; private set; }
 
+        /// <summary>
+        /// An in memory queue of errors thrown by this TraceListener.
+        /// </summary>
         internal IEnumerable<string> Errors { get => _errorsQueue.ToArray(); }
         
+        /// <summary>
+        /// Write a message to this TraceListener.
+        /// </summary>
+        /// <param name="message"></param>
         public override void Write(string message)
         {
+            // short-circuit to drop messages when queue is full.
             if (_queue.Count > _options.MaxLogMessagesToKeep)
             {
                 Debug.WriteLine("Dropping message because Queue is full");
                 return;
             }
+
             _queue.Enqueue(message);
         }
 
+        /// <summary>
+        /// Writes a message to this TraceListener.
+        /// </summary>
+        /// <param name="message"></param>
         public override void WriteLine(string message) => Write(message + "\r\n");
 
         /// <summary>
@@ -86,64 +94,61 @@ namespace DanielLarsenNZ
         /// <remarks>
         /// This is a blocking call and should be used sparingly. Buffered logs are automatically Flushed 
         /// periodically and when this TraceListener is disposed.
-        /// TraceListener Errors Queue will not be flushed.
         /// </remarks>
         public override void Flush()
         {
-            AppendLogs().GetAwaiter().GetResult();
+            while (AppendLogs(_queue, _containerName, _options.FilenameFormat).GetAwaiter().GetResult());
             base.Flush();
         }
 
-        //private void DequeueToMaxItems()
-        //{
-        //    int dequeueCount = _queue.Count - _options.MaxLogMessagesToKeep;
-        //    if (dequeueCount > 0)
-        //    {
-        //        Debug.WriteLine($"De-queueing {dequeueCount} items because Queue Count is greater than MaxLogMessagesToKeep ({_options.MaxLogMessagesToKeep})");
-        //        for (int i = 0; i < dequeueCount; i++)
-        //            if (!_queue.TryDequeue(out _)) break;
-        //    }
-        //}
-
-        private void ScheduleAppendLogs(bool speedUp = false) => _timer.Change(speedUp
+        /// <summary>
+        /// Starts a new timeout for the background task. This is <seealso cref="BlobTraceListenerOptions.BackgroundScheduleTimeoutMs"/>,
+        /// or 1000 if speedUp = true.
+        /// </summary>
+        /// <param name="speedUp">When true, timeout is shortened to 1,000 ms</param>
+        private void ScheduleAppendLogs(bool speedUp = false) => 
+            _timer.Change(speedUp
                 ? Math.Min(1000, _options.BackgroundScheduleTimeoutMs)
                 : _options.BackgroundScheduleTimeoutMs,
                 Timeout.Infinite);
 
-        private void ScheduleAppendErrors() => _errorsTimer?.Change(_options.BackgroundScheduleTimeoutMs, Timeout.Infinite);
-
+#pragma warning disable CS4014 // Because this call is not awaited, execution of the current method continues before the call is completed
+        // This is "fire and forget" as per https://stackoverflow.com/a/53844845
         private void TimerCallback(object state) => AppendLogs();
-        private void ErrorsTimerCallback(object state) => AppendErrors();
+#pragma warning restore CS4014 // Because this call is not awaited, execution of the current method continues before the call is completed
 
         private async Task CreateContainerIfNotExists(string containerName)
         {
-            var blobServiceClient = new BlobServiceClient(_connectionString);
-            var containerClient = blobServiceClient.GetBlobContainerClient(containerName);
-            await containerClient.CreateIfNotExistsAsync(PublicAccessType.None);
+            if (!_containerExists)
+            {
+                var blobServiceClient = new BlobServiceClient(_connectionString);
+                var containerClient = blobServiceClient.GetBlobContainerClient(containerName);
+                await containerClient.CreateIfNotExistsAsync(PublicAccessType.None);
+                _containerExists = true;
+            }
         }
 
+        /// <summary>
+        /// Write error messages to an in-memory queue.
+        /// </summary>
+        /// <param name="errorMessage"></param>
         private void BufferError(string errorMessage)
         {
             ErrorCount++;
             _errorsQueue.Enqueue(errorMessage);
-            while (_errorsQueue.Count > _options.MaxErrorMessagesToKeep) _errorsQueue.TryDequeue(out _);
             Debug.WriteLine(errorMessage);
+            while (_errorsQueue.Count > _options.MaxTraceListenerErrorMessagesToKeep) _errorsQueue.TryDequeue(out _);
         }
 
         private async Task AppendLogs()
         {
+            if (_queue.IsEmpty) return;
+            
             bool itemsLeftInQueue = false;
 
             try
             {
-                if (_queue.IsEmpty) return;
-
-                if (!_containerExists)
-                {
-                    await CreateContainerIfNotExists(_containerName);
-                    _containerExists = true;
-                }
-
+                await CreateContainerIfNotExists(_containerName);
                 itemsLeftInQueue = await AppendLogs(_queue, _containerName, _options.FilenameFormat);
             }
             catch (Exception ex)
@@ -153,30 +158,6 @@ namespace DanielLarsenNZ
             finally
             {
                 if (!_options.DontReschedule) ScheduleAppendLogs(itemsLeftInQueue);
-            }
-        }
-
-        private async Task AppendErrors()
-        {
-            try
-            {
-                if (_errorsQueue.IsEmpty) return;
-
-                if (!_errorsContainerExists)
-                {
-                    await CreateContainerIfNotExists(_options.TraceListenerErrorsContainerName);
-                    _errorsContainerExists = true;
-                }
-
-                await AppendLogs(_errorsQueue, _options.TraceListenerErrorsContainerName, _options.TraceListenerErrorsFilenameFormat);
-            }
-            catch (Exception ex)
-            {
-                BufferError(ex.Message);
-            }
-            finally
-            {
-                if (!_options.DontReschedule) ScheduleAppendErrors();
             }
         }
 
@@ -196,49 +177,50 @@ namespace DanielLarsenNZ
             {
                 using (var writer = new StreamWriter(stream))
                 {
-                    //while (!queue.IsEmpty)
                     var queueCount = queue.Count;
+                    int totalBytes = 0;
+                    int itemCount = 0;
+                    const int maxAppendBlockSize = 4000000;
+
+                    // Append one block of messages up to a maximum of 4MB
+                    while (totalBytes < maxAppendBlockSize)
                     {
-                        int totalBytes = 0;
-                        int itemCount = 0;
-                        while (totalBytes < 4000000)
+                        // peek to see if greater than max append block size
+                        if (queue.TryPeek(out string peekResult))
                         {
-                            if (queue.TryPeek(out string peekResult))
-                            {
-                                if (totalBytes + Encoding.Unicode.GetByteCount(peekResult) > 4000000) break;
-                                // there is an edge case here...
-                            }
-
-                            if (queue.TryDequeue(out string result)) writer.Write(result);
-                            else break;
-
-                            itemCount++;
-                            totalBytes += Encoding.Unicode.GetByteCount(result);
+                            if (totalBytes + Encoding.Unicode.GetByteCount(peekResult) > maxAppendBlockSize) break;
+                            // there is an edge case here during Flush...
                         }
 
-                        if (itemCount > 0)
+                        if (queue.TryDequeue(out string result)) writer.Write(result);
+                        else break;
+
+                        itemCount++;
+                        totalBytes += Encoding.Unicode.GetByteCount(result);
+                    }
+
+                    if (itemCount > 0)
+                    {
+                        itemsLeftInQueue = queueCount - itemCount;
+                        Debug.WriteLine($"BlobTraceListener.AppendLogs: Appending {itemCount} items, {totalBytes} bytes, leaving {itemsLeftInQueue} in the queue");
+                        writer.Flush();
+                        stream.Seek(0, SeekOrigin.Begin);
+                        try
                         {
-                            itemsLeftInQueue = queueCount - itemCount;
-                            Debug.WriteLine($"BlobTraceListener.AppendLogs: Appending {itemCount} items, {totalBytes} bytes, leaving {itemsLeftInQueue} in the queue");
-                            writer.Flush();
-                            stream.Seek(0, SeekOrigin.Begin);
-                            try
-                            {
-                                await appendBlobClient.AppendBlockAsync(stream);
-                            }
-                            catch (Azure.RequestFailedException ex) when (ex.ErrorCode == "RequestBodyTooLarge")
-                            {
-                                // Blob has reached max append block count (50,000) or max blob size ~195GB
-                                // Don't append any more. All logs in the buffer are lost
-                                // Blob writing will not resume until a new blob is created
-                                BufferError(ex.Message);
-                            }
+                            await appendBlobClient.AppendBlockAsync(stream);
                         }
-                        else
+                        catch (Azure.RequestFailedException ex) when (ex.ErrorCode == "RequestBodyTooLarge")
                         {
-                            // Don't Trace!
-                            Debug.WriteLine("BlobTraceListener.AppendLogs: Could not TryDequeue any items");
+                            // Blob has reached max append block count (50,000) or max blob size ~195GB
+                            // Don't append any more. All logs in the buffer are lost
+                            // Blob writing will not resume until a new blob is created
+                            BufferError(ex.Message);
                         }
+                    }
+                    else
+                    {
+                        // Don't Trace!
+                        Debug.WriteLine("BlobTraceListener.AppendLogs: Could not TryDequeue any items");
                     }
                 }
             }
