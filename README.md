@@ -12,6 +12,7 @@ var listener = new BlobTraceListener(
     config["AZURE_STORAGE_CONTAINER_NAME"]);
 
 listener.WriteLine("Hello world");
+listener.Flush();
 ```
 
 With options
@@ -29,6 +30,7 @@ var listener = new BlobTraceListener(
     });
 
 listener.WriteLine("Hello world!");
+listener.Flush();
 ```
 
 ## Links and references
