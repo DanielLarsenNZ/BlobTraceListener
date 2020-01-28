@@ -33,7 +33,7 @@ namespace DanielLarsenNZ.Tests
                 {
                     BackgroundScheduleTimeoutMs = 4000,
                     FilenameFormat = "yyyy/MM/dd/HH\\.\\l\\o\\g",
-                    MaxLogMessagesToKeep = 20000
+                    MaxLogMessagesToQueue = 20000
                 });
 
             listener.WriteLine("Hello world!");
@@ -51,7 +51,13 @@ namespace DanielLarsenNZ.Tests
             var config = TestsHelper.GetConfiguration();
             var listener = new BlobTraceListener(
                 config["AZURE_STORAGE_CONNECTIONSTRING"],
-                config["AZURE_STORAGE_CONTAINER_NAME"]);
+                config["AZURE_STORAGE_CONTAINER_NAME"],
+                string.Empty,
+                new BlobTraceListenerOptions
+                {
+                    BackgroundScheduleTimeoutMs = 4000,
+                    MaxLogMessagesToQueue = 20000
+                });
 
             for (int i = 0; i < 3600; i++)
             {

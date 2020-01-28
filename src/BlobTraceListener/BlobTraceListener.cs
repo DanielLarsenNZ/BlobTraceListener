@@ -28,6 +28,7 @@ namespace DanielLarsenNZ
         private readonly Timer _timer;
         private bool _containerExists;
         private readonly BlobTraceListenerOptions _options;
+        private string _lastFilename;
 
         public BlobTraceListener(string connectionString, string containerName) : this(
             connectionString,
@@ -73,7 +74,7 @@ namespace DanielLarsenNZ
         public override void Write(string message)
         {
             // short-circuit to drop messages when queue is full.
-            if (_queue.Count > _options.MaxLogMessagesToKeep)
+            if (_queue.Count > _options.MaxLogMessagesToQueue)
             {
                 Debug.WriteLine("Dropping message because Queue is full");
                 return;
@@ -103,12 +104,12 @@ namespace DanielLarsenNZ
 
         /// <summary>
         /// Starts a new timeout for the background task. This is <seealso cref="BlobTraceListenerOptions.BackgroundScheduleTimeoutMs"/>,
-        /// or 1000 if speedUp = true.
+        /// or 200 if speedUp = true.
         /// </summary>
-        /// <param name="speedUp">When true, timeout is shortened to 1,000 ms</param>
+        /// <param name="speedUp">When true, timeout is shortened to 200 ms</param>
         private void ScheduleAppendLogs(bool speedUp = false) => 
             _timer.Change(speedUp
-                ? Math.Min(1000, _options.BackgroundScheduleTimeoutMs)
+                ? Math.Min(200, _options.BackgroundScheduleTimeoutMs)
                 : _options.BackgroundScheduleTimeoutMs,
                 Timeout.Infinite);
 
@@ -169,8 +170,7 @@ namespace DanielLarsenNZ
             // https://stackoverflow.com/a/53844845
 
             var filename = DateTime.UtcNow.ToString(filenameFormat);
-            var appendBlobClient = new AppendBlobClient(_connectionString, containerName, filename);
-            await appendBlobClient.CreateIfNotExistsAsync(new BlobHttpHeaders { ContentType = "text/plain" });
+            var appendBlobClient = await GetAppendBlobClient(_connectionString, containerName, filename);
 
             int itemsLeftInQueue = 0;
             using (var stream = new MemoryStream())
@@ -180,15 +180,14 @@ namespace DanielLarsenNZ
                     var queueCount = queue.Count;
                     int totalBytes = 0;
                     int itemCount = 0;
-                    const int maxAppendBlockSize = 4000000;
 
                     // Append one block of messages up to a maximum of 4MB
-                    while (totalBytes < maxAppendBlockSize)
+                    while (totalBytes < appendBlobClient.AppendBlobMaxAppendBlockBytes)
                     {
                         // peek to see if greater than max append block size
                         if (queue.TryPeek(out string peekResult))
                         {
-                            if (totalBytes + Encoding.Unicode.GetByteCount(peekResult) > maxAppendBlockSize) break;
+                            if (totalBytes + Encoding.Unicode.GetByteCount(peekResult) > appendBlobClient.AppendBlobMaxAppendBlockBytes) break;
                             // there is an edge case here during Flush...
                         }
 
@@ -226,6 +225,25 @@ namespace DanielLarsenNZ
             }
 
             return itemsLeftInQueue > 0;
+        }
+
+        private async Task<AppendBlobClient> GetAppendBlobClient(
+            string connectionString,
+            string containerName,
+            string filename)
+        {
+            // AppendBlobClient HTTP connection is cached under the hood
+            var appendBlobClient = new AppendBlobClient(connectionString, containerName, filename);
+            await CreateBlobIfNotExists(appendBlobClient, filename);
+            return appendBlobClient;
+        }
+
+        private async Task CreateBlobIfNotExists(AppendBlobClient appendBlobClient, string filename)
+        {
+            if (filename == _lastFilename) return;
+
+            await appendBlobClient.CreateIfNotExistsAsync(new BlobHttpHeaders { ContentType = "text/plain" });
+            _lastFilename = filename;
         }
     }
 }
