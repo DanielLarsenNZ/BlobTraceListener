@@ -10,8 +10,8 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-    
-[assembly:InternalsVisibleTo("BlobTraceListener.Tests")]
+
+[assembly: InternalsVisibleTo("BlobTraceListener.Tests")]
 
 namespace DanielLarsenNZ
 {
@@ -48,8 +48,8 @@ namespace DanielLarsenNZ
             _containerName = containerName;
             _options = options;
             _timer = new Timer(TimerCallback);
-            
-            ScheduleAppendLogs();            
+
+            ScheduleAppendLogs();
         }
 
         /// <summary>
@@ -66,7 +66,7 @@ namespace DanielLarsenNZ
         /// An in memory queue of errors thrown by this TraceListener.
         /// </summary>
         internal IEnumerable<string> Errors { get => _errorsQueue.ToArray(); }
-        
+
         /// <summary>
         /// Write a message to this TraceListener.
         /// </summary>
@@ -98,18 +98,18 @@ namespace DanielLarsenNZ
         /// </remarks>
         public override void Flush()
         {
-            while (AppendLogs(_queue, _containerName, _options.FilenameFormat).GetAwaiter().GetResult());
+            while (AppendLogs(_queue, _containerName, _options.FilenameFormat).GetAwaiter().GetResult()) ;
             base.Flush();
         }
 
         /// <summary>
         /// Starts a new timeout for the background task. This is <seealso cref="BlobTraceListenerOptions.BackgroundScheduleTimeoutMs"/>,
-        /// or 200 if speedUp = true.
+        /// or 100 if speedUp = true.
         /// </summary>
-        /// <param name="speedUp">When true, timeout is shortened to 200 ms</param>
-        private void ScheduleAppendLogs(bool speedUp = false) => 
+        /// <param name="speedUp">When true, timeout is shortened to 100 ms</param>
+        private void ScheduleAppendLogs(bool speedUp = false) =>
             _timer.Change(speedUp
-                ? Math.Min(200, _options.BackgroundScheduleTimeoutMs)
+                ? Math.Min(100, _options.BackgroundScheduleTimeoutMs)
                 : _options.BackgroundScheduleTimeoutMs,
                 Timeout.Infinite);
 
@@ -144,7 +144,7 @@ namespace DanielLarsenNZ
         private async Task AppendLogs()
         {
             if (_queue.IsEmpty) return;
-            
+
             bool itemsLeftInQueue = false;
 
             try
@@ -173,56 +173,62 @@ namespace DanielLarsenNZ
             var appendBlobClient = await GetAppendBlobClient(_connectionString, containerName, filename);
 
             int itemsLeftInQueue = 0;
-            using (var stream = new MemoryStream())
-            {
-                using (var writer = new StreamWriter(stream))
+            int queueCount = queue.Count;
+            //while (queueCount > 0)
+            //{
+                using (var stream = new MemoryStream())
                 {
-                    var queueCount = queue.Count;
-                    int totalBytes = 0;
-                    int itemCount = 0;
-
-                    // Append one block of messages up to a maximum of 4MB
-                    while (totalBytes < appendBlobClient.AppendBlobMaxAppendBlockBytes)
+                    using (var writer = new StreamWriter(stream))
                     {
-                        // peek to see if greater than max append block size
-                        if (queue.TryPeek(out string peekResult))
+
+
+                        int totalBytes = 0;
+                        int itemCount = 0;
+
+                        // Append one block of messages up to a maximum of 4MB
+                        while (totalBytes < appendBlobClient.AppendBlobMaxAppendBlockBytes)
                         {
-                            if (totalBytes + Encoding.Unicode.GetByteCount(peekResult) > appendBlobClient.AppendBlobMaxAppendBlockBytes) break;
-                            // there is an edge case here during Flush...
+                            // peek to see if greater than max append block size
+                            if (queue.TryPeek(out string peekResult))
+                            {
+                                if (totalBytes + Encoding.Unicode.GetByteCount(peekResult) > appendBlobClient.AppendBlobMaxAppendBlockBytes) break;
+                                // there is an edge case here during Flush...
+                            }
+
+                            if (queue.TryDequeue(out string result)) writer.Write(result);
+                            else break;
+
+                            itemCount++;
+                            totalBytes += Encoding.Unicode.GetByteCount(result);
                         }
 
-                        if (queue.TryDequeue(out string result)) writer.Write(result);
-                        else break;
-
-                        itemCount++;
-                        totalBytes += Encoding.Unicode.GetByteCount(result);
-                    }
-
-                    if (itemCount > 0)
-                    {
-                        itemsLeftInQueue = queueCount - itemCount;
-                        Debug.WriteLine($"BlobTraceListener.AppendLogs: Appending {itemCount} items, {totalBytes} bytes, leaving {itemsLeftInQueue} in the queue");
-                        writer.Flush();
-                        stream.Seek(0, SeekOrigin.Begin);
-                        try
+                        if (itemCount > 0)
                         {
-                            await appendBlobClient.AppendBlockAsync(stream);
+                            itemsLeftInQueue = queueCount - itemCount;
+                            Debug.WriteLine($"BlobTraceListener.AppendLogs: Appending {itemCount} items, {totalBytes} bytes, leaving {itemsLeftInQueue} in the queue");
+                            writer.Flush();
+                            stream.Seek(0, SeekOrigin.Begin);
+                            try
+                            {
+                                await appendBlobClient.AppendBlockAsync(stream);
+                            }
+                            catch (Azure.RequestFailedException ex) when (ex.ErrorCode == "RequestBodyTooLarge")
+                            {
+                                // Blob has reached max append block count (50,000) or max blob size ~195GB
+                                // Don't append any more. All logs in the buffer are lost
+                                // Blob writing will not resume until a new blob is created
+                                BufferError(ex.Message);
+                            }
                         }
-                        catch (Azure.RequestFailedException ex) when (ex.ErrorCode == "RequestBodyTooLarge")
+                        else
                         {
-                            // Blob has reached max append block count (50,000) or max blob size ~195GB
-                            // Don't append any more. All logs in the buffer are lost
-                            // Blob writing will not resume until a new blob is created
-                            BufferError(ex.Message);
+                            // Don't Trace!
+                            Debug.WriteLine("BlobTraceListener.AppendLogs: Could not TryDequeue any items");
                         }
-                    }
-                    else
-                    {
-                        // Don't Trace!
-                        Debug.WriteLine("BlobTraceListener.AppendLogs: Could not TryDequeue any items");
                     }
                 }
-            }
+                //queueCount = queue.Count;
+            //}
 
             return itemsLeftInQueue > 0;
         }

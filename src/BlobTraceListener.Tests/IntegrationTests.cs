@@ -51,13 +51,7 @@ namespace DanielLarsenNZ.Tests
             var config = TestsHelper.GetConfiguration();
             var listener = new BlobTraceListener(
                 config["AZURE_STORAGE_CONNECTIONSTRING"],
-                config["AZURE_STORAGE_CONTAINER_NAME"],
-                string.Empty,
-                new BlobTraceListenerOptions
-                {
-                    BackgroundScheduleTimeoutMs = 4000,
-                    MaxLogMessagesToQueue = 20000
-                });
+                config["AZURE_STORAGE_CONTAINER_NAME"]);
 
             for (int i = 0; i < 3600; i++)
             {

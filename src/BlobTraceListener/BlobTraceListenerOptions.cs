@@ -5,7 +5,7 @@
     /// </summary>
     public class BlobTraceListenerOptions
     {
-        private const int DefaultMaxLogMessagesToQueue = 20000;
+        private const int DefaultMaxLogMessagesToQueue = 10000;
         private const string DefaultFileNameFormat = "yyyy/MM/dd/HH\\.\\l\\o\\g";
         private const int DefaultBackgroundScheduleTimeoutMs = 4000;
         private const int DefaultMaxTraceListenerErrorMessagesToKeep = 20;
@@ -20,19 +20,22 @@
 
         /// <summary>
         /// The maximum number of log messages to queue. Any messages that attempt to be written when 
-        /// queue is full will be dropped. Default is 20,000.
+        /// queue is full will be dropped. Default is 10,000.
         /// </summary>
         public int MaxLogMessagesToQueue { get; set; }
 
         /// <summary>
-        /// The format string passed to `DateTime.UtcNow.ToString()` to derive the blob filename. Default is "yyyy/MM/dd/HH\\.\\l\\o\\g".
+        /// The format string passed to `DateTime.UtcNow.ToString()` to derive the blob filename. Default 
+        /// is "yyyy/MM/dd/HH\\.\\l\\o\\g".
         /// </summary>
         public string FilenameFormat { get; set; }
 
         /// <summary>
-        /// The number of milliseconds to wait before starting a background task to append logs to Blob storage. Default is 4,000 milliseconds.
+        /// The number of milliseconds to wait before starting a background task to append logs to Blob 
+        /// storage. Default is 4,000 milliseconds.
         /// </summary>
-        /// <remarks>If all queued messages cannot be appended in one blob (~4MB) then the timeout is shortened to 200 ms until the queue is cleared.</remarks>
+        /// <remarks>If all queued messages cannot be appended in one blob (~4MB) then the timeout is 
+        /// shortened to 100 ms until the queue is cleared.</remarks>
         public int BackgroundScheduleTimeoutMs { get; set; }
 
         /// <summary>
